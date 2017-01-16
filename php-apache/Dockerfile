@@ -28,6 +28,7 @@ RUN echo 'deb http://s3-eu-west-1.amazonaws.com/qafoo-profiler/packages debian m
     "php$PHP_VERSION-mysql" \
     "php$PHP_VERSION-xsl" \
     "php$PHP_VERSION-zip" \
+    postfix \
  \
  # Clean the image \
  && apt-get auto-remove -qq -y \
