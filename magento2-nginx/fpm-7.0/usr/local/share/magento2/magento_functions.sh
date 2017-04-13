@@ -130,34 +130,57 @@ function do_magento_install_finalise_custom() {
   fi
 }
 
+function do_magento_drop_database() {
+  set +x
+
+  if [ "$FORCE_DATABASE_DROP" != 'true' ]; then
+    return
+  fi
+
+  echo 'Dropping the Magento DB if exists'
+  if [ -n "$DATABASE_ROOT_PASSWORD" ]; then
+    mysql -h"$DATABASE_HOST" -uroot -p"$DATABASE_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS $DATABASE_NAME" || exit 1
+  else
+    mysql -h"$DATABASE_HOST" -uroot -e "DROP DATABASE IF EXISTS $DATABASE_NAME" || exit 1
+  fi
+}
+
+function check_magento_database_exists() {
+  set +e
+  local DATABASE_EXISTS
+  if [ -n "$DATABASE_PASSWORD" ]; then
+    mysql -h"$DATABASE_HOST" -u"$DATABASE_USER" -p"$DATABASE_PASSWORD" "$DATABASE_NAME" -e "SHOW TABLES; SELECT FOUND_ROWS() > 0;" | grep -q 1
+    DATABASE_EXISTS=$?
+  else
+    mysql -h"$DATABASE_HOST" -u"$DATABASE_USER" "$DATABASE_NAME" -e "SHOW TABLES; SELECT FOUND_ROWS() > 0;" | grep -q 1
+    DATABASE_EXISTS=$?
+  fi
+  if [ "$DATABASE_EXISTS" -eq 0 ]; then
+    echo "true";
+  else
+    echo "false";
+  fi
+}
+
+function do_magento_database_create() {
+  echo 'Create Magento database'
+  if [ -n "$DATABASE_ROOT_PASSWORD" ]; then
+    echo "CREATE DATABASE IF NOT EXISTS $DATABASE_NAME ; GRANT ALL ON $DATABASE_NAME.* TO $DATABASE_USER@'$DATABASE_USER_HOST' IDENTIFIED BY '$DATABASE_PASSWORD' ; FLUSH PRIVILEGES" |  mysql -uroot -p"$DATABASE_ROOT_PASSWORD" -h"$DATABASE_HOST"
+  else
+    echo "CREATE DATABASE IF NOT EXISTS $DATABASE_NAME ; GRANT ALL ON $DATABASE_NAME.* TO $DATABASE_USER@'$DATABASE_USER_HOST' IDENTIFIED BY '$DATABASE_PASSWORD' ; FLUSH PRIVILEGES" |  mysql -uroot -h"$DATABASE_HOST"
+  fi
+}
+
 function do_magento_database_install() {
   set +x
   if [ -f "$DATABASE_ARCHIVE_PATH" ]; then
-    if [ "$FORCE_DATABASE_DROP" == 'true' ]; then
-      echo 'Dropping the Magento DB if exists'
-      if [ -n "$DATABASE_ROOT_PASSWORD" ]; then
-        mysql -h"$DATABASE_HOST" -uroot -p"$DATABASE_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS $DATABASE_NAME" || exit 1
-      else
-        mysql -h"$DATABASE_HOST" -uroot -e "DROP DATABASE IF EXISTS $DATABASE_NAME" || exit 1
-      fi
-    fi
-  
-    set +e
-    if [ -n "$DATABASE_PASSWORD" ]; then
-      mysql -h"$DATABASE_HOST" -u"$DATABASE_USER" -p"$DATABASE_PASSWORD" "$DATABASE_NAME" -e "SHOW TABLES; SELECT FOUND_ROWS() > 0;" | grep -q 1
-    else
-      mysql -h"$DATABASE_HOST" -u"$DATABASE_USER" "$DATABASE_NAME" -e "SHOW TABLES; SELECT FOUND_ROWS() > 0;" | grep -q 1
-    fi
-    DATABASE_EXISTS=$?
+    do_magento_drop_database
+
+    local DATABASE_EXISTS="$(check_magento_database_exists)"
     set -e
   
-    if [ "$DATABASE_EXISTS" -ne 0 ]; then
-      echo 'Create Magento database'
-      if [ -n "$DATABASE_ROOT_PASSWORD" ]; then
-        echo "CREATE DATABASE IF NOT EXISTS $DATABASE_NAME ; GRANT ALL ON $DATABASE_NAME.* TO $DATABASE_USER@'$DATABASE_USER_HOST' IDENTIFIED BY '$DATABASE_PASSWORD' ; FLUSH PRIVILEGES" |  mysql -uroot -p"$DATABASE_ROOT_PASSWORD" -h"$DATABASE_HOST"
-      else
-        echo "CREATE DATABASE IF NOT EXISTS $DATABASE_NAME ; GRANT ALL ON $DATABASE_NAME.* TO $DATABASE_USER@'$DATABASE_USER_HOST' IDENTIFIED BY '$DATABASE_PASSWORD' ; FLUSH PRIVILEGES" |  mysql -uroot -h"$DATABASE_HOST"
-      fi
+    if [ "$DATABASE_EXISTS" != "true" ]; then
+      do_magento_database_create
   
       echo 'zcating the magento database dump into the database'
       if [ -n "$DATABASE_ROOT_PASSWORD" ]; then
@@ -168,6 +191,50 @@ function do_magento_database_install() {
     fi
   fi
   set -x
+}
+
+function do_magento_installer_install() {
+  set +x
+  do_magento_wait_for_database
+  do_magento_drop_database
+
+  local DATABASE_EXISTS="$(check_magento_database_exists)"
+  set -e
+
+  if [ "$DATABASE_EXISTS" != "true" ]; then
+    do_magento_database_create
+
+    echo 'Install Magento 2 Database via the Installer'
+    chmod +x bin/magento
+    as_code_owner "bin/magento setup:install --base-url="$PUBLIC_ADDRESS" \
+      --db-host="$DATABASE_HOST" \
+      --db-name="$DATABASE_NAME" \
+      --db-user="$DATABASE_USER" \
+      --db-password="$DATABASE_PASSWORD" \
+      --admin-firstname=Admin \
+      --admin-lastname=Demo \
+      --admin-email=admin@example.com \
+      --admin-user=admin \
+      --admin-password=admin123 \
+      --language=en_GB \
+      --currency=GBP \
+      --timezone=Europe/London \
+      --use-rewrites=1 \
+      --session-save=db"
+  fi
+
+  set -x
+}
+
+function do_magento_wait_for_database() {
+  if [ "$DATABASE_HOST" != 'localhost' ]; then
+    return
+  fi
+
+  while [ ! -S /var/run/mysqld/mysqld.sock ]; do
+    echo "Waiting for a mysql server"
+    sleep 5
+  done
 }
 
 function do_magento_assets_install() {
@@ -246,6 +313,27 @@ function do_magento_remove_config_template() {
   rm /etc/confd/conf.d/magento_config.php.toml
 }
 
+function do_magento_copy_build_auth_to_app() {
+  cp -p /home/build/.composer/auth.json /app
+}
+
+function do_install_sample_data() {
+  do_magento_copy_build_auth_to_app
+  as_code_owner "bin/magento sampledata:deploy"
+
+  do_magento_move_compiled_assets_away_from_codebase
+  do_magento_setup_upgrade
+  do_magento_move_compiled_assets_back_to_codebase
+  do_magento_create_web_writable_directories
+}
+
+function do_magento_download_magerun2() {
+  mkdir -p /app/bin
+  chown build:build /app/bin
+  as_code_owner "wget -O https://files.magerun.net/n98-magerun2.phar" /app/bin
+  chmod +x /app/bin/n98-magerun2.phar
+}
+
 function do_magento2_templating() {
   mkdir -p /app/app/etc/
 }
@@ -260,6 +348,7 @@ function do_magento2_build() {
 
   DATABASE_HOST=localhost DATABASE_USER=root DATABASE_PASSWORD="" DATABASE_ROOT_PASSWORD="" MAGENTO_ENABLE_CACHE="false" MAGENTO_USE_REDIS="false" do_templating
   DATABASE_HOST=localhost DATABASE_USER=root DATABASE_PASSWORD="" DATABASE_ROOT_PASSWORD="" DATABASE_USER_HOST="localhost" do_magento_database_install
+  DATABASE_HOST=localhost DATABASE_USER=root DATABASE_PASSWORD="" DATABASE_ROOT_PASSWORD="" DATABASE_USER_HOST="localhost" do_magento_installer_install
   do_magento_assets_cleanup
 
   do_magento_move_compiled_assets_away_from_codebase
