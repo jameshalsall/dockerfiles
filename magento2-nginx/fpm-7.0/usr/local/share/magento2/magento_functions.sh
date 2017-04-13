@@ -204,7 +204,7 @@ function do_magento_installer_install() {
   if [ "$DATABASE_EXISTS" != "true" ]; then
     do_magento_database_create
 
-    echo 'Install Magento 2 Database via the Installer'
+    echo 'Install Magento 2 via the Installer'
     chmod +x bin/magento
     as_code_owner "bin/magento setup:install --base-url="$PUBLIC_ADDRESS" \
       --db-host="$DATABASE_HOST" \
@@ -330,7 +330,7 @@ function do_install_sample_data() {
 function do_magento_download_magerun2() {
   mkdir -p /app/bin
   chown build:build /app/bin
-  as_code_owner "wget -O https://files.magerun.net/n98-magerun2.phar" /app/bin
+  as_code_owner "wget -O n98-magerun2.phar https://files.magerun.net/n98-magerun2.phar" /app/bin
   chmod +x /app/bin/n98-magerun2.phar
 }
 
