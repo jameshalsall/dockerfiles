@@ -258,7 +258,9 @@ function do_magento_assets_install() {
 }
 
 function do_magento_assets_cleanup() {
-  find /app/tools/assets/ -type f ! -path "*${DATABASE_ARCHIVE_PATH}" -delete
+  if [ -d /app/tools/assets/ ]; then
+    find /app/tools/assets/ -type f ! -path "*${DATABASE_ARCHIVE_PATH}" -delete
+  fi
 }
 
 function do_magento_install_development_custom() {
