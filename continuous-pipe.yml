@@ -1,18 +1,18 @@
 tasks:
-  ##################################
-  # Second level dependency images #
-  ##################################
-  second_level_dependency_images:
+  ##################################################
+  # Build ubuntu first as most things depend on it #
+  ##################################################
+  third_level_dependency_images:
     build:
       services:
         ubuntu:
           image: quay.io/continuouspipe/ubuntu16.04
           tag: latest
 
-  #################################
-  # First level dependency images #
-  #################################
-  first_level_dependency_images:
+  ################################
+  # Build intermediate images #1 #
+  ################################
+  second_level_dependency_images:
     build:
       services:
         nginx:
@@ -64,10 +64,10 @@ tasks:
           image: quay.io/continuouspipe/varnish4
           tag: latest
 
-  ##################################
-  # Second level dependency images #
-  ##################################
-  second_level_dependency_images:
+  ################################
+  # Build intermediate images #2 #
+  ################################
+  first_level_dependency_images:
     build:
       services:
         symfony_php71_nginx:
@@ -136,6 +136,9 @@ tasks:
           tag: latest
         mysql56:
           image: quay.io/continuouspipe/mysql5.6
+          tag: latest
+        nginx_ingress_controller:
+          image: quay.io/continuouspipe/nginx-reverse-proxy
           tag: latest
         nginx_reverse_proxy:
           image: quay.io/continuouspipe/nginx-reverse-proxy
